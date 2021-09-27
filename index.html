@@ -38,7 +38,7 @@
 			const line_mtl = new THREE.LineBasicMaterial({
 			    color: 0xaaaaaa,//999fff,
 			    opacity: 0.5,
-			    linewidth: 1,
+			    linewidth: 0.01,
 			    transparent: true,
 			    blending: THREE[blending],
 			    blendSrc: THREE[blendSrc[4]],
@@ -238,8 +238,6 @@
 		            // ~ ~ ~ 
 		            layers.push(layer);
 		        }
-		   
-		        animate(performance ? performance.now() : Date.now());
 		    }
 
 		    function getLongestLayer() {
@@ -257,7 +255,7 @@
 
 		    function clearFrame() {
 		        for (let i=scene.children.length; i>=0; i--) {
-		            if (scene.children[i] !== camera && scene.children[i] !== room) {
+		            if (scene.children[i] !== camera) {
 		                scene.remove(scene.children[i]);
 		            }
 		        }
@@ -363,7 +361,6 @@
 
 		    function showReading() {
 		        readingText = createText("READING...", 0, 0, -2000);//1300, -1200, -2800);
-		        render(0);
 		    }
 
 		    function roundVal(value, decimals) {
@@ -493,12 +490,6 @@
 			    sg += "        }"+ "\n";
 			    sg += "    ]"+ "\n";
 			    sg += "}"+ "\n";
-
-			    //let uriContent = "data:text/plain;charset=utf-8," + encodeURIComponent(sg);
-			    //pauseAnimation = false;
-		  		//window.open(uriContent);
-			    
-		        //download("test.json", sg);
 			}
 
 			function download(filename, text) {
@@ -513,8 +504,6 @@
 
 			    document.body.removeChild(element);
 			}
-
-		    // ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 
 		    const dropZone = document.getElementsByTagName("body")[0];
 
@@ -575,17 +564,11 @@
 		            transparent: true,
 		            color: new THREE.Color(color[0],color[1],color[2]),
 		            //sizeAttenuation: false,
-		            opacity: 0.85, 
-		            lineWidth: 0.5,
+		            opacity: 0.95, 
+		            lineWidth: 0.05,
 		            depthWrite: false,
-		            depthTest: false,
+		            //depthTest: false,
 		            blending: THREE.AdditiveBlending
-		            /*
-		            blending: THREE[blending],
-		            blendSrc: THREE[blendSrc[4]],
-		            blendDst: THREE[blendDst[1]],
-		            blendEquation: THREE.AddEquation
-		            */
 		        });
 		    	return mtl;
 		    }
@@ -631,24 +614,38 @@
 		    // ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 		    
 		    const renderer = new THREE.WebGLRenderer({antialias: false});
-		    renderer.setPixelRatio(window.devicePixelRatio);
-
+			renderer.setPixelRatio(window.devicePixelRatio);
+			renderer.setSize(window.innerWidth, window.innerHeight);
 		    document.body.appendChild(renderer.domElement);
 
 		    const scene = new THREE.Scene();
 
-		    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
+			const cameraFov = 60;
+			const cameraAspect = window.innerWidth / window.innerHeight;
+			const cameraNear = 0.1;
+			const cameraFar = 100;
+
+			const camera = new THREE.PerspectiveCamera(cameraFov, cameraAspect, cameraNear, cameraFar);
 
 		    const clock = new THREE.Clock;
 
-		    function init() {
+		    function setup() {
 			    showReading();
 
 				setupWasd();
 				setupMouse();
 
-				draw();
+				window.addEventListener("resize", onWindowResize);
+
+			    //renderer.setAnimationLoop(draw); // new method
+			    draw(); // old method
 		    }
+
+			function onWindowResize() {
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize(window.innerWidth, window.innerHeight);
+			}
 
 		    function draw() {
 				updateWasd();
@@ -692,12 +689,11 @@
 		        	writeJson();
 		        } 	
 
-		        // TODO render
-
-				requestAnimationFrame(draw);
+		        renderer.render(scene, camera);
+			    requestAnimationFrame(draw); // old method
 		    }
 
-		    init();
+		    setup();
 		</script>
 	</body>
 
