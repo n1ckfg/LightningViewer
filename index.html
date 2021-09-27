@@ -194,7 +194,7 @@
 		                layer.frameColors.push(layer.strokeColors);
 		            }
 
-		            console.log("* * * color check: " + layer.frameX.length + " " + layer.frameColors.length + " " + layer.frameX[0].length + " " + layer.frameColors[0].length);
+		            //console.log("* * * color check: " + layer.frameX.length + " " + layer.frameColors.length + " " + layer.frameX[0].length + " " + layer.frameColors[0].length);
 
 		            layer.frames = [];
 
@@ -580,7 +580,7 @@
 					//console.log(paletteColor);
 					if (compareColor(color, paletteColor, 5)) {
 						mtlIndex = i;
-						console.log("Found palette match at index " + i);
+						//console.log("Found palette match at index " + i);
 						break;
 					}
 				}
@@ -588,9 +588,9 @@
 					let mtl = createMtl(color);
 					palette.push(mtl);
 					return palette[palette.length-1];
-					console.log("Creating new color, " + palette.length + " total colors");
+					//console.log("Creating new color, " + palette.length + " total colors");
 				} else {
-					console.log("Reusing color " + mtlIndex + ", " + palette.length + " total colors");
+					//console.log("Reusing color " + mtlIndex + ", " + palette.length + " total colors");
 					return palette[mtlIndex];
 				}
 			}
