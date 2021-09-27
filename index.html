@@ -27,7 +27,7 @@
 			"use strict";
 
 			const laScale = 10;
-			const laOffset = new THREE.Vector3(0, -1.5, 0);//100, -20, 150);//95, -22, 50);//(100, -20, 150);
+			const laOffset = new THREE.Vector3(0, -0.5, -3);//100, -20, 150);//95, -22, 50);//(100, -20, 150);
 			const laRot = new THREE.Vector3(300, 0, 0);//145, 10, 0);
 
 			// http://threejs.org/examples/webgl_materials_blending_custom.html
@@ -90,11 +90,11 @@
 		    }
 
 		    let palette = [];
-		    let defaultColor = [0.667, 0.667, 1];
-		    let minDistance = 0.01;
-		    let useMinDistance = false;
-		    let roundValues = true;
-		    let numPlaces = 7;
+		    const defaultColor = [0.667, 0.667, 1];
+		    const minDistance = 0.01;
+		    const useMinDistance = false;
+		    const roundValues = true;
+		    const numPlaces = 7;
 
 		    const animationPath = "./files/jellyfish.latk";
 		    const brushPath = "./images/brush.png";
@@ -341,9 +341,9 @@
 		        });
 
 		        textGeo.computeBoundingBox();
-		        let centerOffset = -0.5 * (textGeo.boundingBox.max.x - textGeo.boundingBox.min.x);
+		        const centerOffset = 0 ;//-0.5 * (textGeo.boundingBox.max.x - textGeo.boundingBox.min.x);
 
-		        let textMesh = new THREE.Mesh(textGeo, text_mtl);
+		        const textMesh = new THREE.Mesh(textGeo, text_mtl);
 		        textMesh.castShadow = false;
 		        textMesh.receiveShadow = false;
 
