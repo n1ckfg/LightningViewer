@@ -9,12 +9,8 @@
 		<script src="./js/libraries/jszip/jszip.min.js"></script>
 		<script src="./js/libraries/jszip/jszip-utils.min.js"></script>
 
-		<script src="./js/libraries/three.min.js"></script>
-		<script src="./js/libraries/THREE.MeshLine.js"></script>
-
-		<script src="./js/libraries/geometries/TextGeometry.js"></script>
-		<script src="./js/libraries/utils/FontUtils.js"></script>
-		<script src="./js/fonts/helvetiker_bold.typeface.js"></script>
+		<script src="./js/libraries/threejs/three.min.js"></script>
+		<script src="./js/libraries/threejs/THREE.MeshLine.js"></script>
 
 		<script src="./js/general-util.js"></script>
 		<script src="./js/threejs-util.js"></script>
@@ -29,28 +25,6 @@
 			const laScale = 10;
 			const laOffset = new THREE.Vector3(0, -0.5, -3);//100, -20, 150);//95, -22, 50);//(100, -20, 150);
 			const laRot = new THREE.Vector3(300, 0, 0);//145, 10, 0);
-
-			// http://threejs.org/examples/webgl_materials_blending_custom.html
-			let blendSrc = [ "ZeroFactor", "OneFactor", "SrcAlphaFactor", "OneMinusSrcAlphaFactor", "DstAlphaFactor", "OneMinusDstAlphaFactor", "DstColorFactor", "OneMinusDstColorFactor", "SrcAlphaSaturateFactor" ];
-			let blendDst = [ "ZeroFactor", "OneFactor", "SrcColorFactor", "OneMinusSrcColorFactor", "SrcAlphaFactor", "OneMinusSrcAlphaFactor", "DstAlphaFactor", "OneMinusDstAlphaFactor" ];
-			let blending = "CustomBlending";
-			    
-			const line_mtl = new THREE.LineBasicMaterial({
-			    color: 0xaaaaaa,//999fff,
-			    opacity: 0.5,
-			    linewidth: 0.01,
-			    transparent: true,
-			    blending: THREE[blending],
-			    blendSrc: THREE[blendSrc[4]],
-			    blendDst: THREE[blendDst[1]],
-			    blendEquation: THREE.AddEquation
-			});
-
-			const text_mtl = new THREE.MeshBasicMaterial({ 
-			    color: 0xffff00,
-			    depthTest: false,
-			    depthWrite: true 
-			});
 
 		    let resolution = new THREE.Vector2(window.innerWidth, window.innerHeight);
 		    let hidden = false;
@@ -67,7 +41,6 @@
 		    let armTogglePause = false;
 		    let armSaveJson = false;
 
-		    let readingText;
 		    let texture;
 
 		    let layers = [];
@@ -221,7 +194,7 @@
 		                    }
 		                    geometry.verticesNeedUpdate = true;
 
-		                    let line = new THREE.MeshLine();
+		                    let line = new MeshLine();
 		                    line.setGeometry(geometry);
 
 		                    let meshLine = new THREE.Mesh(line.geometry, createUniqueMtl([layer.frameColors[i][j][0], layer.frameColors[i][j][1], layer.frameColors[i][j][2]]));
@@ -357,10 +330,6 @@
 
 		    function getLoopFrame(_frame) {
 		        return ((layers[getLongestLayer()].loopCounter * (layers[getLongestLayer()].frames.length - 1)) + _frame) * frameInterval;
-		    }
-
-		    function showReading() {
-		        readingText = createText("READING...", 0, 0, -2000);//1300, -1200, -2800);
 		    }
 
 		    function roundVal(value, decimals) {
@@ -516,8 +485,6 @@
 
 		    // Get file data on drop
 		    dropZone.addEventListener('drop', function(e) {
-		        showReading();
-
 		        e.stopPropagation();
 		        e.preventDefault();
 		        let files = e.dataTransfer.files; // Array of all files
@@ -558,16 +525,16 @@
 		    });
 
 		    function createMtl(color) {
-		    	let mtl = new THREE.MeshLineMaterial({
+		    	let mtl = new MeshLineMaterial({
 		            useMap: 1,
 		            map: texture,
 		            transparent: true,
 		            color: new THREE.Color(color[0],color[1],color[2]),
-		            //sizeAttenuation: false,
+		            sizeAttenuation: true,
 		            opacity: 0.95, 
 		            lineWidth: 0.05,
 		            depthWrite: false,
-		            //depthTest: false,
+		            depthTest: false,
 		            blending: THREE.AdditiveBlending
 		        });
 		    	return mtl;
@@ -630,15 +597,13 @@
 		    const clock = new THREE.Clock;
 
 		    function setup() {
-			    showReading();
-
 				setupWasd();
 				setupMouse();
 
 				window.addEventListener("resize", onWindowResize);
 
-			    //renderer.setAnimationLoop(draw); // new method
-			    draw(); // old method
+			    renderer.setAnimationLoop(draw); // new method
+			    //draw(); // old method
 		    }
 
 			function onWindowResize() {
@@ -690,7 +655,7 @@
 		        } 	
 
 		        renderer.render(scene, camera);
-			    requestAnimationFrame(draw); // old method
+			    //requestAnimationFrame(draw); // old method
 		    }
 
 		    setup();
