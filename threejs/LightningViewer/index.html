@@ -586,6 +586,7 @@
 		    document.body.appendChild(renderer.domElement);
 
 		    const scene = new THREE.Scene();
+		    scene.background = new THREE.Color(0x404040);
 
 			const cameraFov = 60;
 			const cameraAspect = window.innerWidth / window.innerHeight;
