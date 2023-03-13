@@ -528,14 +528,14 @@
 		    	let mtl = new MeshLineMaterial({
 		            useMap: 1,
 		            map: texture,
-		            transparent: true,
+		            transparent: false,
 		            color: new THREE.Color(color[0],color[1],color[2]),
 		            sizeAttenuation: true,
-		            opacity: 0.95, 
-		            lineWidth: 0.05,
-		            depthWrite: false,
-		            depthTest: false,
-		            blending: THREE.AdditiveBlending
+		            //opacity: 0.95, 
+		            lineWidth: 0.03,
+		            //depthWrite: false,
+		            //depthTest: false,
+		            //blending: THREE.AdditiveBlending
 		        });
 		    	return mtl;
 		    }
