@@ -53,6 +53,7 @@
 		    const useMinDistance = false;
 		    const roundValues = true;
 		    const numPlaces = 7;
+		    const saveZipped = true; // write a zipped .latk rather than a plain .json
 
 		    const animationPath = "./files/jellyfish.latk";
 		    const brushPath = "./images/brush.png";
@@ -372,8 +373,9 @@
 
 		    // Written straight from the latk.js data model, so the points are the
 		    // originals rather than a round trip through the scaled Three.js geometry.
-		    function writeJson() {
+		    function writeJson(zipped) {
 		    	if (!animationReady) return;
+		    	if (zipped === undefined) zipped = saveZipped;
 
 		    	let jsonLayers = [];
 
@@ -419,18 +421,35 @@
 		            grease_pencil: [ { layers: jsonLayers } ]
 		        };
 
+		        const name = "latk_" + Date.now();
+		        const json = JSON.stringify(data, null, 2);
+
 		        console.log("***********************");
 		        console.log("~OUTPUT~")
 		        console.log("total layers: " + jsonLayers.length);
+		        console.log("total bytes: " + json.length);
 		        console.log("***********************");
 
-		        download("latk_" + Date.now() + ".json", JSON.stringify(data, null, 2));
+		        if (!zipped) {
+		            download(name + ".json", json);
+		            return;
+		        }
+
+		        // A .latk is a zip holding a single entry of the same name, and JSZip
+		        // ships inside latk.js. Deflating typically gets this under a fifth the size.
+		        const zip = new JSZip();
+		        zip.file(name + ".json", json);
+
+		        zip.generateAsync({ type: "blob", compression: "DEFLATE" }).then(function(blob) {
+		            console.log("zipped to " + blob.size + " bytes");
+		            download(name + ".latk", blob);
+		        });
 		    }
 
-			function download(filename, text) {
+			function download(filename, data) {
 			    // A blob url rather than a data uri, since an exported animation
 			    // easily runs to tens of megabytes.
-			    let url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+			    let url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], { type: 'application/json' }));
 
 			    let element = document.createElement('a');
 			    element.setAttribute('href', url);

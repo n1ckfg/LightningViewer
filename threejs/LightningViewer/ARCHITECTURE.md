@@ -34,7 +34,7 @@ This file contains the setup, rendering loop, and the bridge from latk.js data t
 *   **Animation Loop (`draw`)**:
     *   Maintains a fixed framerate (default 12 FPS) using a delta-time accumulator.
     *   Advances each layer's `counter` and swaps the scene contents to the meshes for the active frame.
-*   **Export (`writeJson`)**: Serializes `latk.layers` back to Lightning Artist JSON. Because it reads the latk.js data model directly, it writes the original point data rather than reversing the scale and offset baked into the Three.js geometry.
+*   **Export (`writeJson`)**: Serializes `latk.layers` back to Lightning Artist JSON. Because it reads the latk.js data model directly, it writes the original point data rather than reversing the scale and offset baked into the Three.js geometry. It saves a zipped `.latk` by default, holding a single json entry named after the archive, which is the layout the reader expects and runs a fraction of the size; `saveZipped` sets the default and `writeJson(false)` overrides it to write plain `.json`.
 
 Note: latk.js also exposes `Latk.write()`, `getLongestLayer()`, and `roundVal()`, but those methods are currently non-functional in the library, so the viewer keeps local equivalents.
 
