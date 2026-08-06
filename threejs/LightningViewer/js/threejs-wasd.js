@@ -32,6 +32,8 @@ function setupWasd() {
         if (Util.getKeyCode(event) === 'd') isWalkingRight = false;
         if (Util.getKeyCode(event) === 'q') isFlyingDown = false;
         if (Util.getKeyCode(event) === 'e') isFlyingUp = false;
+
+        if (Util.getKeyCode(event) === 'o') writeJson();
     });
 }
 
