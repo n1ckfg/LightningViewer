@@ -20,8 +20,16 @@ This file contains the setup, rendering loop, and the bridge from latk.js data t
 *   **Data Structures**: None of its own. The animation lives in a single global `Latk` instance named `latk`, made of latk.js `LatkLayer` / `LatkFrame` / `LatkStroke` / `LatkPoint` objects. The name must stay `latk`, because `Latk.jsonToGp()` reads its options (`yUp`, `useScaleAndOffset`) from that global.
 *   **Loading (`loadLatk`, `loadLatkFile`)**:
     *   `loadLatk(path)` calls `Latk.read(path)`, which handles both zipped `.latk` and plain `.json` URLs and flips `latk.ready` when done.
-    *   `loadLatkFile(file)` handles drag-and-drop. A dropped `.json` is parsed and handed to `latk.readJson()`; a dropped `.latk` is unzipped with the JSZip bundled in latk.js, then handed to the same `latk.readJson()`.
+    *   `loadLatkFile(file)` handles drag-and-drop of `.json`, `.latk`, `.tilt`, and `.quill`, dispatching on the extension. Everything but `.json` is a zip archive, opened with the JSZip bundled in latk.js.
     *   Both first replace `latk` with a fresh, not-yet-ready instance, so the render loop cannot rebuild against the previous animation while the new one loads.
+*   **Format handling**: A `.json` is handed straight to `latk.readJson()`, and a `.latk` is its single zipped entry, so it takes the same path. `.tilt` and `.quill` are described by the `loaderFormats` table, which pairs each extension with its latk.js loader class and the two archive entries that class needs:
+
+    | Extension | Loader | Manifest | Binary |
+    | --- | --- | --- | --- |
+    | `.tilt` | `TiltLoader` | `metadata.json` | `data.sketch` |
+    | `.quill` | `QuillLoader` | `Quill.json` | `Quill.qbin` |
+
+    The viewer sets `loader.json` and `loader.bytes`, calls `loader.parse()`, and converts the resulting flat stroke list into one `LatkLayer` holding one `LatkFrame` — the same shape `Latk.readTiltBrush()` and `Latk.readQuill()` produce, but reading a dropped `File` instead of a URL. Two conversions are applied: both loaders report color as 0–255 while `LatkStroke` wants 0–1, and `fitStrokes()` recenters and uniformly scales the sketch, since Tilt Brush and Quill work in room-scale meters wherever the artist was standing while a `.latk` sits within roughly half a unit of the origin.
 *   **Geometry (`buildFrames`)**: Runs once `latk.ready` is set. For each stroke it scales and offsets the points (`laScale`, `laOffset`), builds a `THREE.Geometry`, wraps it in a `MeshLine`, and assigns a material from a deduplicated color palette. The resulting per-frame mesh lists are stored on each `LatkLayer` as `meshFrames`, alongside the `counter` / `loopCounter` fields latk.js already provides for playback.
 *   **Animation Loop (`draw`)**:
     *   Maintains a fixed framerate (default 12 FPS) using a delta-time accumulator.
@@ -47,7 +55,7 @@ The application implements a custom first-person camera control system split acr
 
 ## Data Flow
 
-1.  **Input**: A `.latk` or `.json` file is loaded from `animationPath`, or drag-and-dropped onto the browser window.
-2.  **Reading**: latk.js does the work — `Latk.read()` for a URL, or `latk.readJson()` after the viewer unzips a dropped `.latk`. Either way `Latk.jsonToGp()` walks the `grease_pencil` array and produces `LatkLayer` → `LatkFrame` → `LatkStroke` → `LatkPoint` objects, and sets `latk.ready`.
+1.  **Input**: A `.latk` or `.json` file is loaded from `animationPath`, or a `.latk`, `.json`, `.tilt`, or `.quill` file is drag-and-dropped onto the browser window.
+2.  **Reading**: latk.js does the work — `Latk.read()` for a URL, `latk.readJson()` for dropped Lightning Artist data, or `TiltLoader` / `QuillLoader` for a dropped sketch. Either way the result is `LatkLayer` → `LatkFrame` → `LatkStroke` → `LatkPoint` objects and a `latk.ready` of true.
 3.  **Geometry Generation**: `buildFrames()` turns each stroke's points into a `THREE.Geometry`, wraps it in a `MeshLine`, and assigns a palette material matching the stroke color.
 4.  **Rendering**: `renderer.setAnimationLoop(draw)` runs continuously. Depending on the elapsed time, the scene is cleared of the previous frame's strokes and populated with the current frame's strokes.
