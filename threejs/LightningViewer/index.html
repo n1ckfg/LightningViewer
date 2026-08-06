@@ -366,7 +366,23 @@
 		    }
 
 		    function roundVal(value, decimals) {
-		        return Number(Math.round(value+'e'+decimals)+'e-'+decimals);
+		        // Shifting the decimal point with a string exponent keeps 1.005 rounding the
+		        // way it reads, but the exponent has to be split off first: a value that already
+		        // prints as "1e-7" would otherwise become "1e-7e7", which is NaN -- and NaN
+		        // serializes to null.
+		        const num = Number(value);
+		        if (!isFinite(num)) return 0;
+		
+		        let places = Math.floor(Number(decimals));
+		        if (!isFinite(places)) places = 0;
+		
+		        const up = num.toExponential().split('e');
+		        const rounded = Math.round(Number(up[0] + 'e' + (Number(up[1]) + places)));
+		        if (!isFinite(rounded)) return num; // out of range to shift, leave it alone
+		
+		        const down = rounded.toExponential().split('e');
+		        const result = Number(down[0] + 'e' + (Number(down[1]) - places));
+		        return isFinite(result) ? result : num;
 		    }
 
 		    // ~ ~ ~   saving   ~ ~ ~
@@ -401,6 +417,11 @@
 		                            vertex_color: point.vertex_color
 		                        });
 		                    }
+
+		                    //let color = stroke.color;
+		                    //if (color && color[3] == null) {
+		                    //    color = [color[0], color[1], color[2], 1.0];
+		                    //}
 
 		                    jsonStrokes.push({
 		                        color: stroke.color,
