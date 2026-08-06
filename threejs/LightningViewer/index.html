@@ -64,6 +64,49 @@
 		        latk = Latk.read(path); // latk.js handles both .latk (zipped) and .json
 		    }
 
+		    // Tilt Brush and Quill archives pair a json manifest with a binary blob of
+		    // stroke data. latk.js reads both, via TiltLoader and QuillLoader.
+		    const loaderFormats = {
+		        tilt:  { loader: TiltLoader,  json: "metadata.json", binary: "data.sketch" },
+		        quill: { loader: QuillLoader, json: "Quill.json",    binary: "Quill.qbin" }
+		    };
+
+		    // A .latk sits within roughly half a unit of the origin, which is what laScale
+		    // and laOffset are tuned for. Tilt Brush and Quill work in room-scale meters
+		    // wherever the artist happened to be standing, so an imported sketch gets
+		    // recentered and uniformly scaled to match.
+		    const importExtent = 0.5;
+
+		    function fitStrokes(strokes) {
+		        let lo = [ Infinity, Infinity, Infinity ];
+		        let hi = [ -Infinity, -Infinity, -Infinity ];
+
+		        for (let stroke of strokes) {
+		            for (let point of stroke.points) {
+		                for (let i=0; i<3; i++) {
+		                    if (point.co[i] < lo[i]) lo[i] = point.co[i];
+		                    if (point.co[i] > hi[i]) hi[i] = point.co[i];
+		                }
+		            }
+		        }
+
+		        const extent = Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
+		        if (!(extent > 0)) return; // no points, or every point in the same spot
+
+		        const scale = importExtent / extent;
+		        const center = [ (lo[0] + hi[0])/2, (lo[1] + hi[1])/2, (lo[2] + hi[2])/2 ];
+
+		        for (let stroke of strokes) {
+		            for (let point of stroke.points) {
+		                point.co = [
+		                    (point.co[0] - center[0]) * scale,
+		                    (point.co[1] - center[1]) * scale,
+		                    (point.co[2] - center[2]) * scale
+		                ];
+		            }
+		        }
+		    }
+
 		    function loadLatkFile(file) {
 		        animationReady = false;
 		        // Swap in an empty, not-yet-ready Latk so draw() can't rebuild the old one
@@ -71,32 +114,90 @@
 
 		        const pending = latk;
 		        const reader = new FileReader();
+		        const layerName = Latk.getFileNameNoExt(file.name);
 		        const extension = Latk.getExtFromFileName(file.name).toLowerCase();
+		        const format = loaderFormats[extension];
 
-		        function receive(json) {
+		        function receiveJson(json) {
 		            if (latk !== pending) return; // a newer file was dropped while this one loaded
 		            latk.readJson(json);
 		        }
 
+		        // TiltLoader and QuillLoader hand back a flat stroke list rather than an
+		        // animation, so a sketch becomes one layer holding one frame.
+		        function receiveStrokes(loaderStrokes) {
+		            if (latk !== pending) return;
+
+		            const layer = new LatkLayer(layerName);
+		            const frame = new LatkFrame();
+
+		            for (let loaderStroke of loaderStrokes) {
+		                if (loaderStroke.positions.length === 0) continue;
+
+		                let points = [];
+		                
+		                if (extension === "tilt") {
+			                for (let position of loaderStroke.positions) {
+			                    points.push(new LatkPoint([position[0] / 10, position[1] / 10, position[2] / 10]));
+			                }
+		                } else {
+			                for (let position of loaderStroke.positions) {
+			                    points.push(new LatkPoint([position[0], position[1], position[2]]));
+			                }
+		            	}
+
+		                // Both loaders report color as 0-255, LatkStroke wants 0-1
+		                let color = loaderStroke.brushColor.map(function(channel) {
+		                    return channel / 255;
+		                });
+
+		                frame.strokes.push(new LatkStroke(points, color));
+		            }
+
+		            fitStrokes(frame.strokes);
+
+		            layer.frames.push(frame);
+		            latk.layers = [ layer ];
+		            latk.ready = true;
+
+		            console.log("Latk loaded from " + extension + ".");
+		        }
+
 		        if (extension === "json") {
 		            reader.onload = function(e) {
-		                receive(JSON.parse(e.target.result));
+		                receiveJson(JSON.parse(e.target.result));
 		            };
 
 		            reader.readAsText(file, "UTF-8");
 		        } else {
 		            reader.onload = function(e) {
-		                // JSZip ships inside latk.js, so a .latk is just a zipped .json
+		                // JSZip ships inside latk.js, and every format here is a zip archive
 		                const zip = new JSZip();
-		                zip.loadAsync(e.target.result).then(function() {
-		                    // https://github.com/Stuk/jszip/issues/375
-		                    const entries = Object.keys(zip.files).map(function(name) {
-		                        return zip.files[name];
-		                    });
 
-		                    return zip.file(entries[0].name).async("string");
-		                }).then(function(response) {
-		                    receive(JSON.parse(response));
+		                zip.loadAsync(e.target.result).then(function() {
+		                    if (format === undefined) {
+		                        // a .latk is just a zipped .json
+		                        // https://github.com/Stuk/jszip/issues/375
+		                        const entries = Object.keys(zip.files).map(function(entryName) {
+		                            return zip.files[entryName];
+		                        });
+
+		                        return zip.file(entries[0].name).async("string").then(function(response) {
+		                            receiveJson(JSON.parse(response));
+		                        });
+		                    }
+
+		                    const loader = new format.loader();
+
+		                    return zip.file(format.json).async("string").then(function(response) {
+		                        loader.json = JSON.parse(response);
+		                        return zip.file(format.binary).async("arraybuffer");
+		                    }).then(function(response) {
+		                        loader.bytes = new Uint8Array(response);
+		                        loader.parse();
+		                        loader.ready = true;
+		                        receiveStrokes(loader.strokes);
+		                    });
 		                });
 		            };
 
