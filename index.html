@@ -1,11 +1,659 @@
 <!DOCTYPE html>
 <html>
 
-<head>
-	<meta http-equiv="refresh" content="0;url=./threejs/LightningViewer"/>
-</head>
+	<head>
+		<title>LightningViewer</title>
 
-<body>
-</body>
+		<link rel="stylesheet" href="./css/main.css"/>
+
+		<script src="./js/libraries/latk/latk.js"></script>
+
+		<script src="./js/libraries/threejs/three.min.js"></script>
+		<script src="./js/libraries/threejs/THREE.MeshLine.js"></script>
+
+		<script src="./js/general-util.js"></script>
+		<script src="./js/threejs-util.js"></script>
+		<script src="./js/threejs-wasd.js"></script>
+		<script src="./js/threejs-mouse.js"></script>
+	</head>
+
+	<body>
+		<script>
+			"use strict";
+
+			const laScale = 10;
+			const laOffset = new THREE.Vector3(0, -0.5, -3);//100, -20, 150);//95, -22, 50);//(100, -20, 150);
+			const laRot = new THREE.Vector3(300, 0, 0);//145, 10, 0);
+
+		    let resolution = new THREE.Vector2(window.innerWidth, window.innerHeight);
+		    let hidden = false;
+		    const fps = 12.0;
+		    const frameInterval = (1.0/fps);// * 1000;
+		    let frameDelta = 0;
+		    let time = 0;
+		    let pTime = 0;
+		    let pauseAnimation = false;
+
+		    let armFrameForward = false;
+		    let armFrameBack = false;
+		    let armTogglePause = false;
+		    let armSaveJson = false;
+
+		    let texture;
+
+		    // latk.js keeps the animation data (layers -> frames -> strokes -> points).
+		    // The name is global on purpose: Latk.jsonToGp() reads its options from here.
+		    let latk = new Latk();
+		    // Set true once the Three.js geometry for latk.layers has been built.
+		    let animationReady = false;
+
+		    let palette = [];
+		    const defaultColor = [0.667, 0.667, 1];
+		    const minDistance = 0.01;
+		    const useMinDistance = false;
+		    const roundValues = true;
+		    const numPlaces = 7;
+		    const saveZipped = true; // write a zipped .latk rather than a plain .json
+
+		    const animationPath = "./files/jellyfish.latk";
+		    const brushPath = "./images/brush.png";
+
+		    // ~ ~ ~   loading   ~ ~ ~
+
+		    function loadLatk(path) {
+		        animationReady = false;
+		        latk = Latk.read(path); // latk.js handles both .latk (zipped) and .json
+		    }
+
+		    // Tilt Brush and Quill archives pair a json manifest with a binary blob of
+		    // stroke data. latk.js reads both, via TiltLoader and QuillLoader.
+		    const loaderFormats = {
+		        tilt:  { loader: TiltLoader,  json: "metadata.json", binary: "data.sketch" },
+		        quill: { loader: QuillLoader, json: "Quill.json",    binary: "Quill.qbin" }
+		    };
+
+		    // A .latk sits within roughly half a unit of the origin, which is what laScale
+		    // and laOffset are tuned for. Tilt Brush and Quill work in room-scale meters
+		    // wherever the artist happened to be standing, so an imported sketch gets
+		    // recentered and uniformly scaled to match.
+		    const importExtent = 0.5;
+
+		    function fitStrokes(strokes) {
+		        let lo = [ Infinity, Infinity, Infinity ];
+		        let hi = [ -Infinity, -Infinity, -Infinity ];
+
+		        for (let stroke of strokes) {
+		            for (let point of stroke.points) {
+		                for (let i=0; i<3; i++) {
+		                    if (point.co[i] < lo[i]) lo[i] = point.co[i];
+		                    if (point.co[i] > hi[i]) hi[i] = point.co[i];
+		                }
+		            }
+		        }
+
+		        const extent = Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
+		        if (!(extent > 0)) return; // no points, or every point in the same spot
+
+		        const scale = importExtent / extent;
+		        const center = [ (lo[0] + hi[0])/2, (lo[1] + hi[1])/2, (lo[2] + hi[2])/2 ];
+
+		        for (let stroke of strokes) {
+		            for (let point of stroke.points) {
+		                point.co = [
+		                    (point.co[0] - center[0]) * scale,
+		                    (point.co[1] - center[1]) * scale,
+		                    (point.co[2] - center[2]) * scale
+		                ];
+		            }
+		        }
+		    }
+
+		    function loadLatkFile(file) {
+		        animationReady = false;
+		        // Swap in an empty, not-yet-ready Latk so draw() can't rebuild the old one
+		        latk = new Latk();
+
+		        const pending = latk;
+		        const reader = new FileReader();
+		        const layerName = Latk.getFileNameNoExt(file.name);
+		        const extension = Latk.getExtFromFileName(file.name).toLowerCase();
+		        const format = loaderFormats[extension];
+
+		        function receiveJson(json) {
+		            if (latk !== pending) return; // a newer file was dropped while this one loaded
+		            latk.readJson(json);
+		        }
+
+		        // TiltLoader and QuillLoader hand back a flat stroke list rather than an
+		        // animation, so a sketch becomes one layer holding one frame.
+		        function receiveStrokes(loaderStrokes) {
+		            if (latk !== pending) return;
+
+		            const layer = new LatkLayer(layerName);
+		            const frame = new LatkFrame();
+
+		            for (let loaderStroke of loaderStrokes) {
+		                if (loaderStroke.positions.length === 0) continue;
+
+		                let points = [];
+
+		                // No per-format scaling here: fitStrokes() below normalizes uniformly,
+		                // which divides out any constant applied at this point.
+		                for (let position of loaderStroke.positions) {
+		                    points.push(new LatkPoint([position[0], position[1], position[2]]));
+		                }
+
+		                // Both loaders report color as 0-255, LatkStroke wants 0-1
+		                let color = loaderStroke.brushColor.map(function(channel) {
+		                    return channel / 255;
+		                });
+
+		                frame.strokes.push(new LatkStroke(points, color));
+		            }
+
+		            fitStrokes(frame.strokes);
+
+		            layer.frames.push(frame);
+		            latk.layers = [ layer ];
+		            latk.ready = true;
+
+		            console.log("Latk loaded from " + extension + ".");
+		        }
+
+		        if (extension === "json") {
+		            reader.onload = function(e) {
+		                receiveJson(JSON.parse(e.target.result));
+		            };
+
+		            reader.readAsText(file, "UTF-8");
+		        } else {
+		            reader.onload = function(e) {
+		                // JSZip ships inside latk.js, and every format here is a zip archive
+		                const zip = new JSZip();
+
+		                zip.loadAsync(e.target.result).then(function() {
+		                    if (format === undefined) {
+		                        // a .latk is just a zipped .json
+		                        // https://github.com/Stuk/jszip/issues/375
+		                        const entries = Object.keys(zip.files).map(function(entryName) {
+		                            return zip.files[entryName];
+		                        });
+
+		                        return zip.file(entries[0].name).async("string").then(function(response) {
+		                            receiveJson(JSON.parse(response));
+		                        });
+		                    }
+
+		                    const loader = new format.loader();
+
+		                    return zip.file(format.json).async("string").then(function(response) {
+		                        loader.json = JSON.parse(response);
+		                        return zip.file(format.binary).async("arraybuffer");
+		                    }).then(function(response) {
+		                        loader.bytes = new Uint8Array(response);
+		                        loader.parse();
+		                        loader.ready = true;
+		                        receiveStrokes(loader.strokes);
+		                    });
+		                });
+		            };
+
+		            reader.readAsArrayBuffer(file);
+		        }
+		    }
+
+		    // Builds one Three.js mesh per stroke and stores the per-frame lists on
+		    // each LatkLayer as meshFrames, alongside the counters latk.js already keeps.
+		    function buildFrames() {
+		        clearFrame();
+		        palette = [];
+
+		        let frameCount = 0;
+		        let strokeCount = 0;
+		        let pointCount = 0;
+
+		        for (let layer of latk.layers) {
+		            layer.counter = 0;
+		            layer.loopCounter = 0;
+		            layer.meshFrames = [];
+
+		            let oldStrokes = [];
+
+		            for (let frame of layer.frames) {
+		                let strokes = [];
+
+		                for (let stroke of frame.strokes) {
+		                    if (stroke.points.length === 0) continue;
+
+		                    let geometry = new THREE.Geometry();
+		                    geometry.dynamic = true;
+
+		                    let lastVert = null;
+
+		                    for (let point of stroke.points) {
+		                        let vert = new THREE.Vector3(
+		                            (point.co[0] * laScale) + laOffset.x,
+		                            (point.co[1] * laScale) + laOffset.y,
+		                            (point.co[2] * laScale) + laOffset.z);
+
+		                        if (lastVert === null || !useMinDistance || vert.distanceTo(lastVert) > minDistance) {
+		                            geometry.vertices.push(vert);
+		                        }
+
+		                        lastVert = vert;
+		                        pointCount++;
+		                    }
+
+		                    geometry.verticesNeedUpdate = true;
+
+		                    let line = new MeshLine();
+		                    line.setGeometry(geometry);
+
+		                    strokes.push(new THREE.Mesh(line.geometry, createUniqueMtl(stroke.color)));
+		                    strokeCount++;
+		                }
+
+		                if (strokes.length !== 0) {
+		                    oldStrokes = strokes;
+		                    layer.meshFrames.push(strokes);
+		                } else if (strokes.length === 0 && oldStrokes) {
+		                    layer.meshFrames.push(oldStrokes);
+		                }
+		            }
+
+		            if (layer.meshFrames.length > frameCount) frameCount = layer.meshFrames.length;
+		        }
+
+		        console.log("***********************");
+		        console.log("~INPUT~")
+		        console.log("total layers: " + latk.layers.length);
+		        console.log("total frames: " + frameCount);
+		        console.log("total strokes: " + strokeCount);
+		        console.log("total points: " + pointCount);
+		        console.log("total colors: " + palette.length);
+		        console.log("***********************");
+
+		        animationReady = true;
+		    }
+
+		    // ~ ~ ~   playback   ~ ~ ~
+
+		    function getLongestLayer() {
+		        let returns = 0;
+		        let longest = 0;
+		        for (let h=0; h<latk.layers.length; h++) {
+		            if (latk.layers[h].meshFrames.length > longest) {
+		                longest = latk.layers[h].meshFrames.length;
+		                returns = h;
+		            }
+		        }
+		        return returns;
+		    }
+
+		    function redrawFrame(index) {
+		        if (index === 0) clearFrame();
+		        refreshFrame(index);
+		    }
+
+		    function clearFrame() {
+		        for (let i=scene.children.length-1; i>=0; i--) {
+		            if (scene.children[i] !== camera) {
+		                scene.remove(scene.children[i]);
+		            }
+		        }
+		    }
+
+		    function refreshFrame(index) {
+		        let layer = latk.layers[index];
+		        if (layer.meshFrames.length === 0) return;
+
+		        for (let mesh of layer.meshFrames[layer.counter]) {
+		            scene.add(mesh);
+		        }
+		    }
+
+		    function frameMain() {
+		        for (let h=0; h<latk.layers.length; h++) {
+		            redrawFrame(h);
+		            latk.layers[h].counter++;
+		            if (latk.layers[h].counter >= latk.layers[h].meshFrames.length - 1) {
+		                latk.layers[h].counter = 0;
+		                latk.layers[h].loopCounter++;
+
+		                if (h == getLongestLayer()) {
+		                    //
+		                }
+		            }
+		        }
+		    }
+
+		    function frameForward() {
+		        for (let h=0; h<latk.layers.length; h++) {
+		            latk.layers[h].counter++;
+		            if (latk.layers[h].counter >= latk.layers[h].meshFrames.length - 1) latk.layers[h].counter = 0;
+		            redrawFrame(h);
+		        }
+		    }
+
+		    function frameBack() {
+		        for (let h=0; h<latk.layers.length; h++) {
+		            latk.layers[h].counter--;
+		            if (latk.layers[h].counter <= 0) latk.layers[h].counter = latk.layers[h].meshFrames.length - 1;
+		            redrawFrame(h);
+		        }
+		    }
+
+		    function getLoopFrame(_frame) {
+		        let layer = latk.layers[getLongestLayer()];
+		        return ((layer.loopCounter * (layer.meshFrames.length - 1)) + _frame) * frameInterval;
+		    }
+
+		    // ~ ~ ~   misc   ~ ~ ~
+
+		    function rotateAroundObjectAxis(object, axis, radians) {
+		        let rotObjectMatrix = new THREE.Matrix4();
+		        rotObjectMatrix.makeRotationAxis(axis.normalize(), radians);
+		        object.matrix.multiply(rotObjectMatrix);
+		        object.rotation.setFromRotationMatrix(object.matrix);
+		    }
+
+		    function rotateAroundWorldAxis(object, axis, radians) {
+		        let rotWorldMatrix = new THREE.Matrix4();
+		        rotWorldMatrix.makeRotationAxis(axis.normalize(), radians);
+		        rotWorldMatrix.multiply(object.matrix);                // pre-multiply
+		        object.matrix = rotWorldMatrix;
+		        object.rotation.setFromRotationMatrix(object.matrix);
+		    }
+
+		    function roundVal(value, decimals) {
+		        // Shifting the decimal point with a string exponent keeps 1.005 rounding the
+		        // way it reads, but the exponent has to be split off first: a value that already
+		        // prints as "1e-7" would otherwise become "1e-7e7", which is NaN -- and NaN
+		        // serializes to null.
+		        const num = Number(value);
+		        if (!isFinite(num)) return 0;
+		
+		        let places = Math.floor(Number(decimals));
+		        if (!isFinite(places)) places = 0;
+		
+		        const up = num.toExponential().split('e');
+		        const rounded = Math.round(Number(up[0] + 'e' + (Number(up[1]) + places)));
+		        if (!isFinite(rounded)) return num; // out of range to shift, leave it alone
+		
+		        const down = rounded.toExponential().split('e');
+		        const result = Number(down[0] + 'e' + (Number(down[1]) - places));
+		        return isFinite(result) ? result : num;
+		    }
+
+		    // ~ ~ ~   saving   ~ ~ ~
+
+		    // Written straight from the latk.js data model, so the points are the
+		    // originals rather than a round trip through the scaled Three.js geometry.
+		    function writeJson(zipped) {
+		    	if (!animationReady) return;
+		    	if (zipped === undefined) zipped = saveZipped;
+
+		    	let jsonLayers = [];
+
+		        for (let layer of latk.layers) {
+		            let jsonFrames = [];
+
+		            for (let frame of layer.frames) {
+		                let jsonStrokes = [];
+
+		                for (let stroke of frame.strokes) {
+		                    let jsonPoints = [];
+
+		                    for (let point of stroke.points) {
+		                        let co = point.co;
+		                        if (roundValues) {
+		                            co = [roundVal(co[0], numPlaces), roundVal(co[1], numPlaces), roundVal(co[2], numPlaces)];
+		                        }
+
+		                        jsonPoints.push({
+		                            co: co,
+		                            pressure: point.pressure,
+		                            strength: point.strength,
+		                            vertex_color: point.vertex_color
+		                        });
+		                    }
+
+		                    //let color = stroke.color;
+		                    //if (color && color[3] == null) {
+		                    //    color = [color[0], color[1], color[2], 1.0];
+		                    //}
+
+		                    jsonStrokes.push({
+		                        color: stroke.color,
+		                        fill_color: stroke.fill_color,
+		                        points: jsonPoints
+		                    });
+		                }
+
+		                jsonFrames.push({ strokes: jsonStrokes });
+		            }
+
+		            jsonLayers.push({ name: layer.name, frames: jsonFrames });
+		        }
+
+		        const data = {
+		            creator: "LightningViewer",
+		            version: 2.8,
+		            grease_pencil: [ { layers: jsonLayers } ]
+		        };
+
+		        const name = "latk_" + Date.now();
+		        const json = JSON.stringify(data, null, 2);
+
+		        console.log("***********************");
+		        console.log("~OUTPUT~")
+		        console.log("total layers: " + jsonLayers.length);
+		        console.log("total bytes: " + json.length);
+		        console.log("***********************");
+
+		        if (!zipped) {
+		            download(name + ".json", json);
+		            return;
+		        }
+
+		        // A .latk is a zip holding a single entry of the same name, and JSZip
+		        // ships inside latk.js. Deflating typically gets this under a fifth the size.
+		        const zip = new JSZip();
+		        zip.file(name + ".json", json);
+
+		        zip.generateAsync({ type: "blob", compression: "DEFLATE" }).then(function(blob) {
+		            console.log("zipped to " + blob.size + " bytes");
+		            download(name + ".latk", blob);
+		        });
+		    }
+
+			function download(filename, data) {
+			    // A blob url rather than a data uri, since an exported animation
+			    // easily runs to tens of megabytes.
+			    let url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], { type: 'application/json' }));
+
+			    let element = document.createElement('a');
+			    element.setAttribute('href', url);
+			    element.setAttribute('download', filename);
+
+			    element.style.display = 'none';
+			    document.body.appendChild(element);
+
+			    element.click();
+
+			    document.body.removeChild(element);
+			    URL.revokeObjectURL(url);
+			}
+
+		    const dropZone = document.getElementsByTagName("body")[0];
+
+		    // Optional.   Show the copy icon when dragging over.  Seems to only work for chrome.
+		    dropZone.addEventListener('dragover', function(e) {
+		        e.stopPropagation();
+		        e.preventDefault();
+		        e.dataTransfer.dropEffect = 'copy';
+		    });
+
+		    // Get file data on drop
+		    dropZone.addEventListener('drop', function(e) {
+		        e.stopPropagation();
+		        e.preventDefault();
+		        let files = e.dataTransfer.files; // Array of all files
+		        for (let i=0, file; file=files[i]; i++) {
+		            loadLatkFile(file);
+		            break; // one animation at a time
+		        }
+		    });
+
+		    // ~ ~ ~   materials   ~ ~ ~
+
+		    function createMtl(color) {
+		    	let mtl = new MeshLineMaterial({
+		            useMap: 1,
+		            map: texture,
+		            transparent: false,
+		            color: new THREE.Color(color[0],color[1],color[2]),
+		            sizeAttenuation: true,
+		            //opacity: 0.95,
+		            lineWidth: 0.03,
+		            //depthWrite: false,
+		            //depthTest: false,
+		            //blending: THREE.AdditiveBlending
+		        });
+		    	return mtl;
+		    }
+
+			function createUniqueMtl(color) {
+				if (color === undefined) color = defaultColor;
+
+				let mtlIndex = -1;
+				for (let i=0; i<palette.length; i++) {
+					let paletteColor = [palette[i].uniforms.color.value.r, palette[i].uniforms.color.value.g, palette[i].uniforms.color.value.b];
+					//console.log(paletteColor);
+					if (compareColor(color, paletteColor, 5)) {
+						mtlIndex = i;
+						//console.log("Found palette match at index " + i);
+						break;
+					}
+				}
+				if (mtlIndex === -1) {
+					let mtl = createMtl(color);
+					palette.push(mtl);
+					return palette[palette.length-1];
+					//console.log("Creating new color, " + palette.length + " total colors");
+				} else {
+					//console.log("Reusing color " + mtlIndex + ", " + palette.length + " total colors");
+					return palette[mtlIndex];
+				}
+			}
+
+		    function compareColor(c1, c2, numPlaces) {
+		    	//console.log(c1 + " " + c2);
+		        let r1 = roundVal(c1[0], numPlaces);
+		        let r2 = roundVal(c2[0], numPlaces);
+		        let g1 = roundVal(c1[1], numPlaces);
+		        let g2 = roundVal(c2[1], numPlaces);
+		        let b1 = roundVal(c1[2], numPlaces);
+		        let b2 = roundVal(c2[2], numPlaces);
+		        if (r1 === r2 && g1 === g2 && b1 === b2) {
+		            return true;
+		        } else {
+		            return false;
+		        }
+		    }
+
+		    // ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
+		    // ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
+
+		    const renderer = new THREE.WebGLRenderer({antialias: false});
+			renderer.setPixelRatio(window.devicePixelRatio);
+			renderer.setSize(window.innerWidth, window.innerHeight);
+		    document.body.appendChild(renderer.domElement);
+
+		    const scene = new THREE.Scene();
+		    scene.background = new THREE.Color(0x404040);
+
+			const cameraFov = 60;
+			const cameraAspect = window.innerWidth / window.innerHeight;
+			const cameraNear = 0.1;
+			const cameraFar = 100;
+
+			const camera = new THREE.PerspectiveCamera(cameraFov, cameraAspect, cameraNear, cameraFar);
+
+		    const clock = new THREE.Clock;
+
+		    function setup() {
+				setupWasd();
+				setupMouse();
+
+				window.addEventListener("resize", onWindowResize);
+
+				texture = new THREE.TextureLoader().load(brushPath);
+
+				loadLatk(animationPath);
+
+			    renderer.setAnimationLoop(draw); // new method
+			    //draw(); // old method
+		    }
+
+			function onWindowResize() {
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize(window.innerWidth, window.innerHeight);
+			}
+
+		    function draw() {
+				updateWasd();
+
+				if (!animationReady && latk.ready) buildFrames();
+
+		        if (animationReady) {
+			        if (armFrameForward) {
+			            armFrameForward = false;
+			            pauseAnimation = true;
+			            frameForward();
+			            console.log("ff: " + latk.layers[getLongestLayer()].counter);
+			        }
+
+			        if (armFrameBack) {
+			            armFrameBack = false;
+			            pauseAnimation = true;
+			            frameBack();
+			            console.log("rew: " + latk.layers[getLongestLayer()].counter);
+			        }
+
+			        if (armTogglePause) {
+			            pauseAnimation = !pauseAnimation;
+			            console.log("pause: " + pauseAnimation);
+			            armTogglePause = false;
+			        }
+
+			    	if (!pauseAnimation) {
+				        if (!hidden) {
+				            pTime = time;
+				            time = new Date().getTime() / 1000;
+				            frameDelta += time - pTime;
+				        }
+
+				        if (frameDelta >= frameInterval) {
+				            frameDelta = 0;
+
+			                frameMain();
+				        }
+			        }
+
+				    if (armSaveJson) {
+			        	armSaveJson = false;
+			        	writeJson();
+			        }
+		        }
+
+		        renderer.render(scene, camera);
+			    //requestAnimationFrame(draw); // old method
+		    }
+
+		    setup();
+		</script>
+	</body>
 
 </html>
